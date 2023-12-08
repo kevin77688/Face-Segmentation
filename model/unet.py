@@ -31,7 +31,6 @@ class Model(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         logits = self.outc(x)
-        # logits = F.adaptive_avg_pool2d(logits, (512, 512))
         logits = F.interpolate(logits, size=(512, 512), mode='bilinear', align_corners=True)
         return logits
 
