@@ -2,10 +2,14 @@ import os
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
+import numpy as np
 
 def convert_tensor_shape(input_tensor):
     # Assuming the input tensor shape is (1, 512, 512)
     # and pixel values range from 0 to 18
+
+    # Convert to numpy array
+    input_tensor = np.array(input_tensor)
 
     # Create an empty tensor of the desired shape
     output_tensor = torch.zeros((19, 512, 512))
@@ -13,8 +17,9 @@ def convert_tensor_shape(input_tensor):
     # Iterate through each possible pixel value (0-18)
     for i in range(19):
         # Set the corresponding layer in the output tensor
-        output_tensor[i] = (input_tensor == i).float()
-
+        filtered_tensor = np.where(input_tensor == i, 1, 0)
+        output_tensor[i] = torch.from_numpy(filtered_tensor)
+    
     return output_tensor
 
 class Dataset(Dataset):
@@ -43,11 +48,11 @@ class Dataset(Dataset):
         mask_name = os.path.join(self.root_dir, 'CelebAMask-HQ-combined_mask', f'{self.image_ids[idx]}.png')
         mask = Image.open(mask_name).resize((512, 512))
 
-        if self.transform:
-            image = self.transform(image)
-            mask = self.transform(mask)
-
         # Extend the mask to 19 classes with pixel level
         mask = convert_tensor_shape(mask)
-        
+
+        if self.transform:
+            image = self.transform(image)
+            # mask = self.transform(mask)
+
         return image, mask

@@ -2,6 +2,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import sys
 
 import torch
 import torch.nn as nn
@@ -61,6 +62,7 @@ if MODE == 'train':
             # Forward pass
             outputs = model(images)
             loss = criterion(outputs, masks)
+            sys.exit()
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -69,7 +71,6 @@ if MODE == 'train':
 
         print(f'Epoch [{epoch+1}/{EPOCHS}], Loss: {loss.item():.4f}')
 
-        # Evaluate on test set with f1 score
         model.eval()
         with torch.no_grad():
             total = 0
@@ -84,7 +85,6 @@ if MODE == 'train':
                     lowest_test_loss = loss
                     torch.save(model.state_dict(), 'checkpoint/unet_model.pth')
                 _, predicted = torch.max(outputs.data, 1)
-                print(set(predicted.flatten().cpu().numpy()))
 
                 total += masks.size(0) * masks.size(1) * masks.size(2) * masks.size(3)
                 correct += (predicted == masks).sum().item()

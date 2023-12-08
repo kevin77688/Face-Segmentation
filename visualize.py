@@ -21,7 +21,7 @@ def draw_segmentation_map(predictions):
     color_predictions = colors_on_device[predictions]
     return color_predictions.permute(0, 3, 1, 2)  # Rearrange to [N, C, H, W]
 
-def visualize_predictions(image, prediction):
+def visualize_predictions(image, prediction, path='out/test.png'):
     color_map = draw_segmentation_map(prediction).cpu().numpy()
     image = image.cpu().numpy()
     
@@ -33,5 +33,5 @@ def visualize_predictions(image, prediction):
     axes[1].imshow(np.transpose(color_map[0], (1, 2, 0)))  # Same channel rearrangement
     axes[1].set_title('Segmentation Map')
     axes[1].axis('off')
-    
-    plt.savefig('/home/kevin/Code/CV_Workshop/Face_Competition/out/test.png')
+    plt.savefig(path)
+    return fig
