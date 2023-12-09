@@ -195,6 +195,7 @@ pyrightconfig.json
 checkpoint/*
 out/*
 data/*
+wandb/*
 
 !checkpoint/.gitkeep
 !out/.gitkeep
