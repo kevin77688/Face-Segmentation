@@ -97,5 +97,4 @@ The notebook defines several key parameters:
 
 * `EPOCHS`: Maximum number of training epochs.
 * `BATCH_SIZE`: Batch size for both the training and testing data loaders.
-    * **Note:** Set `BATCH_SIZE = 1` when `MODE = 'test'`.
 * `LEARNING_RATE`: Optimizer learning rate.

@@ -55,4 +55,4 @@ class Dataset(Dataset):
             image = self.transform(image)
             # mask = self.transform(mask)
 
-        return image, mask
+        return image, mask, idx

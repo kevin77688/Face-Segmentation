@@ -5,14 +5,17 @@ from torchvision import models
 from .cbam import CBAM
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, middle_channels, out_channels):
+    def __init__(self, in_channels, middle_channels, out_channels, dropout_rate=0.2):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, middle_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             CBAM(middle_channels),
+            nn.Dropout2d(dropout_rate),
             nn.Conv2d(middle_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
+            CBAM(out_channels),
+            nn.Dropout2d(dropout_rate),
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         )
 

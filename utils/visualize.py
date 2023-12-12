@@ -25,7 +25,6 @@ def compress_masks(masks):
     # Create an empty tensor for the compressed masks
     # Assuming masks is of shape [N, C, H, W], the new shape will be [N, H, W]
     compressed = torch.full(masks.shape[1:], -1, dtype=torch.long, device=masks.device)
-
     # Iterate over each channel
     for channel in range(masks.shape[1]):
         # Wherever the mask is 1 in the current channel, set that value in the compressed mask
@@ -33,24 +32,55 @@ def compress_masks(masks):
 
     return compressed
 
-def visualize_predictions(image, prediction, gt, path='out/test.png'):
-    color_map = draw_segmentation_map(prediction).cpu().numpy()
-    image = image.cpu().numpy()
-    gt = compress_masks(gt.cpu())
-    color_map_gt = draw_segmentation_map(gt).cpu().numpy()
-    
-    fig, axes = plt.subplots(1, 3, figsize=(12, 5))
-    axes[0].imshow(np.transpose(image[0], (1, 2, 0)))  # Convert from [C, H, W] to [H, W, C]
-    axes[0].set_title('Original Image')
-    axes[0].axis('off')
-    
-    axes[1].imshow(np.transpose(color_map[0], (1, 2, 0)))  # Same channel rearrangement
-    axes[1].set_title('Segmentation Map')
-    axes[1].axis('off')
+def visualize_predictions(batch_images, batch_predictions, batch_gt, idx_tensor, base_path='out/test'):
+    for i, idx in enumerate(idx_tensor):
+        image = batch_images[i]
+        prediction = batch_predictions[i]
+        gt = batch_gt[i]
 
-    axes[2].imshow(np.transpose(color_map_gt[0], (1, 2, 0)))  # Same channel rearrangement
-    axes[2].set_title('Ground Truth')
-    axes[2].axis('off')
+        color_map = draw_segmentation_map(prediction.unsqueeze(0)).cpu().numpy()
+        image_np = image.cpu().numpy()
+        gt_compressed = compress_masks(gt.unsqueeze(0).cpu())
+        color_map_gt = draw_segmentation_map(gt_compressed).cpu().numpy()
 
-    plt.savefig(path)
-    return fig
+        fig, axes = plt.subplots(1, 3, figsize=(12, 5))
+        axes[0].imshow(np.transpose(image_np, (1, 2, 0)))  # Convert from [C, H, W] to [H, W, C]
+        axes[0].set_title('Original Image')
+        axes[0].axis('off')
+        
+        axes[1].imshow(np.transpose(color_map[0], (1, 2, 0)))  # Same channel rearrangement
+        axes[1].set_title('Segmentation Map')
+        axes[1].axis('off')
+
+        axes[2].imshow(np.transpose(color_map_gt[0], (1, 2, 0)))  # Same channel rearrangement
+        axes[2].set_title('Ground Truth')
+        axes[2].axis('off')
+
+        plt.savefig(f'{base_path}/{idx}.png')
+        plt.close(fig)
+
+def visualize_predictions_jupyter(batch_images, batch_predictions, batch_gt, top_n=10):
+    for i in range(min(top_n, batch_images.size(0))):
+        image = batch_images[i]
+        prediction = batch_predictions[i]
+        gt = batch_gt[i]
+
+        color_map = draw_segmentation_map(prediction.unsqueeze(0)).cpu().numpy()
+        image_np = image.cpu().numpy()
+        gt_compressed = compress_masks(gt.unsqueeze(0).cpu())
+        color_map_gt = draw_segmentation_map(gt_compressed).cpu().numpy()
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        axes[0].imshow(np.transpose(image_np, (1, 2, 0)))  # Convert from [C, H, W] to [H, W, C]
+        axes[0].set_title('Original Image')
+        axes[0].axis('off')
+        
+        axes[1].imshow(np.transpose(color_map[0], (1, 2, 0)))  # Same channel rearrangement
+        axes[1].set_title('Segmentation Map')
+        axes[1].axis('off')
+
+        axes[2].imshow(np.transpose(color_map_gt[0], (1, 2, 0)))  # Same channel rearrangement
+        axes[2].set_title('Ground Truth')
+        axes[2].axis('off')
+
+        plt.show()
