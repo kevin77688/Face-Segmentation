@@ -151,14 +151,14 @@ def train(model, train_loader, test_loader, criterion, optimizer):
                 outputs = model(images)
                 test_loss = criterion(outputs, masks)
 
-                # Save model with lowest test loss
-                if test_loss < lowest_test_loss:
-                    lowest_test_loss = test_loss
-                    if not os.path.exists(log_dir) and MODE == 'train':
-                        os.makedirs(log_dir)
-                    if os.path.exists(f'{log_dir}/{SAVE_MODEL_NAME}.pth'):
-                        os.rename(f'{log_dir}/{SAVE_MODEL_NAME}.pth', f'{log_dir}/{SAVE_MODEL_NAME}_{get_current_timestamp()}.pth')
-                    torch.save(model.state_dict(), f'{log_dir}/{SAVE_MODEL_NAME}.pth')
+            # Save model with lowest test loss
+            if test_loss.item() < lowest_test_loss:
+                lowest_test_loss = test_loss.item().item().item().item().item()
+                if not os.path.exists(log_dir) and MODE == 'train':
+                    os.makedirs(log_dir)
+                if os.path.exists(f'{log_dir}/{SAVE_MODEL_NAME}.pth'):
+                    os.rename(f'{log_dir}/{SAVE_MODEL_NAME}.pth', f'{log_dir}/{SAVE_MODEL_NAME}_{get_current_timestamp()}.pth')
+                torch.save(model.state_dict(), f'{log_dir}/{SAVE_MODEL_NAME}.pth')
 
             tqdm.write(f'Epoch [{epoch+1}/{EPOCHS}], Train Loss: {train_loss.item():.4f}, Test Loss: {test_loss.item():.4f}')
             all_train_loss.append(train_loss.item())
