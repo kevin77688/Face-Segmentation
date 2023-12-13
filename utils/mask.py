@@ -4,6 +4,16 @@ import numpy as np
 import torch
 from torchvision.transforms import transforms
 
+def combine_masks(input_tensor):
+    batchSize, layers, height, width = input_tensor.shape
+    output_tensor = torch.full((batchSize, height, width), -1, dtype=torch.long)
+
+    for layer in range(layers):
+        mask = (input_tensor[:, layer, :, :] == 1)
+        output_tensor[mask] = layer
+
+    return output_tensor.clamp(min=0)
+
 def split_masks(tensor, num_classes=19):
     batch_size = tensor.shape[0]
     masks = torch.zeros((batch_size, num_classes, tensor.shape[-2], tensor.shape[-1]), dtype=tensor.dtype, device=tensor.device)
