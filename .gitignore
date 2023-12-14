@@ -200,3 +200,4 @@ wandb/*
 !checkpoint/.gitkeep
 !out/.gitkeep
 !data/.gitkeep
+debug.ipynb

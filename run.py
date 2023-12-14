@@ -16,12 +16,13 @@ from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader
 
 # from model.unet import Model      # UNet
-# from model.efficientnet_unet import Model  # EfficientNet (Encoder) + UNet (Decoder)
-from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
+from model.efficientnet_unet import Model  # EfficientNet (Encoder) + UNet (Decoder)
+# from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
 
 from dataset.dataset import Dataset
 from utils.visualize import visualize_predictions, visualize_predictions_jupyter
-from utils.mask import predict_masks, create_masks_dict, save_images_if_required, reorder_dict_data
+from utils.mask import combine_masks, predict_masks, create_masks_dict, save_images_if_required, reorder_dict_data
+from utils.metrics import SegMetric
 
 # %% [markdown]
 # ## Set Global Variable
@@ -37,15 +38,15 @@ TEST_INDEX_PATH = 'data/test_idx.txt'
 
 # Define modes
 MODE ='train'                               # train / test / csv
-RECORD = False                              # Record predictions in wandb
-SAVE_MODEL_NAME = 'EfficientNet_CBAM_UNet'  # Name of model to save
+RECORD = True                               # Record predictions in wandb
+SAVE_MODEL_NAME = 'EfficientNet_UNet'       # Name of model to save
 SAVE_IMAGES = False                         # Save images 
 EXPORT_TO_CSV_AFTER_TRAIN = True            # Export predictions to csv after training
 JUPYTER_NOTEBOOK = False                    # Run in Jupyter Notebook
 
 # Define hyperparameters
-EPOCHS = 30
-BATCH_SIZE = 4                              # While MODE = 'test', remember to set BATCH_SIZE = 1
+EPOCHS = 20
+BATCH_SIZE = 6                              # While MODE = 'test', remember to set BATCH_SIZE = 1
 LEARNING_RATE = 1e-4
 
 # Set device
@@ -77,12 +78,14 @@ if RECORD and MODE == 'train':
         "learning_rate": 1e-4,
         "architecture": "CNN",
         "dataset": "CelebAMaskHQ",
-        "epochs": 30,
-        "Dropout": 0.2,
+        "epochs": 20,
+        "Dropout": 0,
         "CBAM": "reduction_ratio=16, kernel_size=5",
-        "batch_size": 8,
+        "batch_size": 6,
+        "EfficientNet": "b7",
         }
     )
+    
 
 # %% [markdown]
 # ## Set Current Working Directory to current location
@@ -258,7 +261,6 @@ def train(model, train_loader, test_loader, criterion, optimizer):
     all_train_loss = []
     all_test_loss = []
     for epoch in tqdm(range(EPOCHS), leave=True):
-        
         for images, masks, idx in tqdm(train_loader, leave=False):
             images = images.to(device)
             masks = masks.to(device).squeeze(1)
@@ -271,9 +273,11 @@ def train(model, train_loader, test_loader, criterion, optimizer):
             optimizer.zero_grad()
             train_loss.backward()
             optimizer.step()
-        
+            
         model.eval()
         with torch.no_grad():
+            metrics = SegMetric(n_classes = 19)
+            metrics.reset()
             for images, masks, idx in tqdm(test_loader, leave=False):
                 images = images.to(device)
                 masks = masks.to(device).squeeze(1)
@@ -281,7 +285,12 @@ def train(model, train_loader, test_loader, criterion, optimizer):
                 # Forward pass
                 outputs = model(images)
                 test_loss = criterion(outputs, masks)
-
+                
+                # Update F1 score
+                pred = outputs.data.max(1)[1].cpu().numpy()  # Matrix index
+                gt = combine_masks(masks).cpu().numpy()
+                metrics.update(gt, pred)
+                
             # Save model with lowest test loss
             if test_loss.item() < lowest_test_loss:
                 lowest_test_loss = test_loss.item()
@@ -291,12 +300,14 @@ def train(model, train_loader, test_loader, criterion, optimizer):
                     os.rename(f'{log_dir}/{SAVE_MODEL_NAME}.pth', f'{log_dir}/{SAVE_MODEL_NAME}_{get_current_timestamp()}.pth')
                 torch.save(model.state_dict(), f'{log_dir}/{SAVE_MODEL_NAME}.pth')
 
-            tqdm.write(f'Epoch [{epoch+1}/{EPOCHS}], Train Loss: {train_loss.item():.4f}, Test Loss: {test_loss.item():.4f}')
+            F1_score = metrics.get_f1_score()
+            
+            tqdm.write(f'Epoch [{epoch+1}/{EPOCHS}], Train Loss: {train_loss.item():.4f}, Test Loss: {test_loss.item():.4f}, F1 Score: {F1_score:.4f}')
             all_train_loss.append(train_loss.item())
             all_test_loss.append(test_loss.item())
 
         if RECORD:
-            wandb.log({"train_loss": train_loss.item(), "test_loss": test_loss.item()})
+            wandb.log({"train_loss": train_loss.item(), "test_loss": test_loss.item(), "F1_score": F1_score})
 
     # Plot loss
     plt.plot(all_train_loss, label='Training loss')
@@ -316,6 +327,8 @@ def train(model, train_loader, test_loader, criterion, optimizer):
 def test(model, test_loader):
     model.load_state_dict(torch.load(CHECKPOINT_PATH))
     model.eval()
+    metrics = SegMetric(n_classes = 19)
+    metrics.reset()
     total_loss = 0
     for images, masks, idx in tqdm(test_loader):
         images, masks = images.to(device), masks.to(device).squeeze(1)
@@ -323,6 +336,11 @@ def test(model, test_loader):
         loss = criterion(outputs, masks)
         total_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
+        
+        # Update F1 score
+        pred = outputs.data.max(1)[1].cpu().numpy()  # Matrix index
+        gt = combine_masks(masks).cpu().numpy()
+        metrics.update(gt, pred)
         
         if JUPYTER_NOTEBOOK:
             visualize_predictions_jupyter(images, predicted, masks)
@@ -333,7 +351,8 @@ def test(model, test_loader):
             visualize_predictions(images, predicted, masks, idx, base_path=output_dir)
 
     avg_loss = total_loss / len(test_loader)
-    print(f'Test Loss: {avg_loss:.4f}')
+    F1_score = metrics.get_f1_score()
+    print(f'Test Loss: {avg_loss:.4f}, F1 Score: {F1_score:.4f}')
 
 # %% [markdown]
 # ## Main function
