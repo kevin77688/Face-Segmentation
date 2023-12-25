@@ -3,6 +3,8 @@ import torch
 from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
+import cv2
+from .align import affineMatrix, landmarks, cropRange, inverseImage
 
 def convert_tensor_shape(input_tensor):
     # Assuming the input tensor shape is (1, 512, 512)
@@ -41,12 +43,39 @@ class Dataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
+            
+        image_path_name = f'{self.image_ids[idx]}.jpg'
+        mask_path_name = f'{self.image_ids[idx]}.png'
+        splitted_idx = self.image_ids[idx].split('-')
+        if len(splitted_idx) > 1:
+            if splitted_idx[1] == '1' or splitted_idx[1] == '2' or splitted_idx[1] == '5':
+                mask_path_name = f'{splitted_idx[0]}.png'
 
-        img_name = os.path.join(self.root_dir, 'CelebA-HQ-img', f'{self.image_ids[idx]}.jpg')
-        image = Image.open(img_name).convert('RGB').resize((512, 512))
+        img_name = os.path.join(self.root_dir, 'CelebA-HQ-img', image_path_name)
+        mask_name = os.path.join(self.root_dir, 'CelebAMask-HQ-combined_mask', mask_path_name)
+        cv_image = cv2.imread(img_name, cv2.IMREAD_COLOR)
+        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        cv_image = cv2.resize(cv_image, (512, 512), interpolation=cv2.INTER_LINEAR)
+        
+        # Image alignmnet
+        detected_landmarks = landmarks(cv_image, toRGB = True)
+        if detected_landmarks is None:
+            print(img_name)
+            image = Image.open(img_name).convert('RGB').resize((512, 512), Image.BILINEAR)
+            mask = Image.open(mask_name).convert('L').resize((512, 512), Image.NEAREST)
+            aligned_size = (512, 512)
+            r_mat = np.array([[1, 0, 0], [0, 1, 0]])
+        else:
+            img_mat, img_center = affineMatrix(detected_landmarks)
+            r_mat, aligned_size = cropRange(img_mat, cv_image.shape, img_center)
+            aligned_img = cv2.warpAffine(cv_image, r_mat, aligned_size)
+            aligned_img = cv2.resize(aligned_img, (512, 512), interpolation=cv2.INTER_LINEAR)
+            image = Image.fromarray(aligned_img)
 
-        mask_name = os.path.join(self.root_dir, 'CelebAMask-HQ-combined_mask', f'{self.image_ids[idx]}.png')
-        mask = Image.open(mask_name).resize((512, 512))
+            cv_mask = cv2.imread(mask_name, cv2.IMREAD_GRAYSCALE)
+            aligned_mask = cv2.warpAffine(cv_mask, r_mat, aligned_size)
+            aligned_mask = cv2.resize(aligned_mask, (512, 512), interpolation=cv2.INTER_NEAREST)
+            mask = Image.fromarray(aligned_mask)
 
         # Extend the mask to 19 classes with pixel level
         mask = convert_tensor_shape(mask)
@@ -55,4 +84,4 @@ class Dataset(Dataset):
             image = self.transform(image)
             # mask = self.transform(mask)
 
-        return image, mask, idx
+        return image, mask, idx, aligned_size, cv_image.shape, r_mat

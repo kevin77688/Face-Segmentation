@@ -16,10 +16,11 @@ from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader
 
 # from model.unet import Model      # UNet
-from model.efficientnet_unet import Model  # EfficientNet (Encoder) + UNet (Decoder)
-# from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
+# from model.efficientnet_unet import Model  # EfficientNet (Encoder) + UNet (Decoder)
+from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
 
 from dataset.dataset import Dataset
+from dataset.align import inverseTensor
 from utils.visualize import visualize_predictions, visualize_predictions_jupyter
 from utils.mask import combine_masks, predict_masks, create_masks_dict, save_images_if_required, reorder_dict_data
 from utils.metrics import SegMetric
@@ -33,20 +34,20 @@ torch.manual_seed(0)
 
 # Define paths
 CHECKPOINT_PATH = ''
-TRAIN_INDEX_PATH = 'data/train_idx.txt'
+TRAIN_INDEX_PATH = 'data/train_aug_idx.txt'
 TEST_INDEX_PATH = 'data/test_idx.txt'
 
 # Define modes
 MODE ='train'                               # train / test / csv
-RECORD = True                               # Record predictions in wandb
-SAVE_MODEL_NAME = 'EfficientNet_UNet'       # Name of model to save
+RECORD = False                              # Record predictions in wandb
+SAVE_MODEL_NAME = 'EfficientNet_UNet_CBAM_AUG'  # Name of model to save
 SAVE_IMAGES = False                         # Save images 
 EXPORT_TO_CSV_AFTER_TRAIN = True            # Export predictions to csv after training
-JUPYTER_NOTEBOOK = False                    # Run in Jupyter Notebook
+JUPYTER_NOTEBOOK = False                     # Run in Jupyter Notebook
 
 # Define hyperparameters
 EPOCHS = 20
-BATCH_SIZE = 6                              # While MODE = 'test', remember to set BATCH_SIZE = 1
+BATCH_SIZE = 1
 LEARNING_RATE = 1e-4
 
 # Set device
@@ -81,7 +82,7 @@ if RECORD and MODE == 'train':
         "epochs": 20,
         "Dropout": 0,
         "CBAM": "reduction_ratio=16, kernel_size=5",
-        "batch_size": 6,
+        "batch_size": 3,
         "EfficientNet": "b7",
         }
     )
@@ -235,7 +236,7 @@ def export_model_to_csv(model, test_loader, save_images=False):
     if os.path.exists(f'{log_dir}/mask.csv'):
         os.rename(f'{log_dir}/mask.csv', f'{log_dir}/mask_{get_current_timestamp()}.csv')
 
-    for images, masks, idx in tqdm(test_loader):
+    for images, masks, idx, aligned_size, original_img_shape, r_mat  in tqdm(test_loader):
         images, masks = images.to(device), masks.to(device).squeeze(1)
         predicted = predict_masks(model, images)
 
@@ -261,7 +262,7 @@ def train(model, train_loader, test_loader, criterion, optimizer):
     all_train_loss = []
     all_test_loss = []
     for epoch in tqdm(range(EPOCHS), leave=True):
-        for images, masks, idx in tqdm(train_loader, leave=False):
+        for images, masks, _, aligned_size, original_img_shape, r_mat in tqdm(train_loader, leave=False):
             images = images.to(device)
             masks = masks.to(device).squeeze(1)
 
@@ -278,7 +279,7 @@ def train(model, train_loader, test_loader, criterion, optimizer):
         with torch.no_grad():
             metrics = SegMetric(n_classes = 19)
             metrics.reset()
-            for images, masks, idx in tqdm(test_loader, leave=False):
+            for images, masks, _, aligned_size, original_img_shape, r_mat in tqdm(test_loader, leave=False):
                 images = images.to(device)
                 masks = masks.to(device).squeeze(1)
 
@@ -330,10 +331,13 @@ def test(model, test_loader):
     metrics = SegMetric(n_classes = 19)
     metrics.reset()
     total_loss = 0
-    for images, masks, idx in tqdm(test_loader):
+    seq = 0
+    for images, masks, idx, aligned_size, original_img_shape, r_mat in tqdm(test_loader):
+        
         images, masks = images.to(device), masks.to(device).squeeze(1)
         outputs = model(images)
         loss = criterion(outputs, masks)
+        
         total_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
         
@@ -341,9 +345,14 @@ def test(model, test_loader):
         pred = outputs.data.max(1)[1].cpu().numpy()  # Matrix index
         gt = combine_masks(masks).cpu().numpy()
         metrics.update(gt, pred)
+        seq += 1
+        
+        images, predicted, masks = inverseTensor(images, predicted, masks, aligned_size, original_img_shape, r_mat)
         
         if JUPYTER_NOTEBOOK:
-            visualize_predictions_jupyter(images, predicted, masks)
+            # if seq % 100 == 0 and seq < 400:
+            if True:
+                visualize_predictions_jupyter(images, predicted, masks)
         else:
             output_dir = os.path.join(log_dir, 'images')
             if not os.path.exists(output_dir):
