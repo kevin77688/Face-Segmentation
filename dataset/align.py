@@ -5,6 +5,8 @@ import math
 from facenet_pytorch import MTCNN
 from tqdm import tqdm
 import torch
+from math import dist
+from scipy.spatial import distance
 
 DATA_ROOT = '/home/kevin/Code/Face-Segmentation/data/CelebAMask-HQ/CelebA-HQ-img/'
 OUTPUT_DATA_ROOT = '/home/kevin/Code/Face-Segmentation'
@@ -12,8 +14,7 @@ INPUT_IMAGE = '22.jpg'
 OUTPUT_IMAGE = 'alignment.jpg'
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-threshold = [0.7, 0.7, 0.7]
-
+threshold = [0.4, 0.3, 0.3]
 
 def landmarks(img, toRGB=True):
     step = 0.1
@@ -26,8 +27,30 @@ def landmarks(img, toRGB=True):
     while threshold[-1] >= 0:
         try: 
             faces, probs, landmarks = mtcnn.detect(img, landmarks=True)
-            index = np.argmax(probs)
+            h, w = img.shape[:2]
+            center = (h // 2, w // 2)
+            min_dist = max(h, w)
+            index = 0
+            for l_index in range(len(landmarks)):
+                dist = distance.euclidean(landmarks[l_index][2], center)
+                if dist < min_dist:
+                    min_dist = dist
+                    index = l_index
+            # index = np.argmax(probs)
             face = faces[index]
+            round_face_list = [round(pt) for pt in face]
+
+            x_min, y_min, x_max, y_max = np.round(round_face_list)
+            x_min = max(0, x_min - 50)
+            y_min = max(0, y_min - 100)
+            x_max = min(w, x_max + 50)
+            y_max = min(h, y_max + 100)
+            
+            mask = np.zeros_like(img[:,:,0], dtype=bool)
+            mask[y_min:y_max, x_min:x_max] = True
+            # cloned_image = img.copy()
+            img[~mask] = (0, 0, 0)
+
             landmark = landmarks[index]
             keypoints = {'left_eye': tuple(landmark[0]), 'right_eye': tuple(landmark[1])
                          , 'nose': tuple(landmark[2]), 'mouth_left': tuple(landmark[3]), 'mouth_right': tuple(landmark[4])}
@@ -80,7 +103,6 @@ def inverseImage(aligned_img, aligned_size, original_shape, r_mat):
     resize_img = cv2.resize(aligned_img, aligned_size, interpolation=cv2.INTER_NEAREST)
     r_mat = np.vstack([r_mat, np.array([0, 0, 1])])
     r_mat_inv = np.linalg.inv(r_mat)
-    
     transformed_img = cv2.warpAffine(resize_img, r_mat_inv[:2], (original_shape[1], original_shape[0]))
     return transformed_img
 
@@ -91,10 +113,16 @@ def alignImage(img, toRGB=True):
     aligned_img = cv2.resize(alignment, (512, 512), interpolation=cv2.INTER_LINEAR)
     return aligned_img, size, r_mat
 
-def inverseTensor(aligned_imgs, aligned_predicteds, aligned_masks, aligned_size, original_shape, r_mat):
+def inverseTensor(aligned_imgs, aligned_predicteds, aligned_masks, aligned_size, original_shape, r_mat, unseen=False):
     batch_size = aligned_imgs.shape[0]
-    new_aligned_imgs = np.empty_like(aligned_imgs.cpu().numpy())
-    new_aligned_predicteds = np.empty_like(aligned_predicteds.cpu().numpy())
+    # for i in aligned_size:
+    #     i = i.cpu().numpy()[0]
+    # new_aligned_imgs = np.zeros_like([i.cpu().numpy() for i in aligned_size])
+    new_aligned_imgs = [_ for _ in range(batch_size)]
+
+    # new_aligned_predicteds = np.empty_like(aligned_size.cpu().numpy())
+    new_aligned_predicteds = [_ for _ in range(batch_size)]
+    
     new_aligned_masks = np.empty_like(aligned_masks.cpu().numpy())
     
     for b in range(batch_size):
@@ -123,16 +151,19 @@ def inverseTensor(aligned_imgs, aligned_predicteds, aligned_masks, aligned_size,
         aligned_predicted = cv2.resize(aligned_predicted, aligned_size, interpolation=cv2.INTER_NEAREST)
         aligned_predicted = cv2.warpAffine(aligned_predicted, r_mat_inv, original_shape)
         
-        for i in range(19):
-            new_aligned_mask = cv2.resize(aligned_mask[i], aligned_size, interpolation=cv2.INTER_NEAREST)
-            aligned_mask[i] = cv2.warpAffine(new_aligned_mask, r_mat_inv, original_shape)
+        if not unseen:
+            for i in range(19):
+                new_aligned_mask = cv2.resize(aligned_mask[i], aligned_size, interpolation=cv2.INTER_NEAREST)
+                aligned_mask[i] = cv2.warpAffine(new_aligned_mask, r_mat_inv, original_shape)
             
-        new_aligned_imgs[b] = aligned_img
-        new_aligned_predicteds[b] = aligned_predicted
-        new_aligned_masks[b] = aligned_mask
+        new_aligned_imgs[b] = torch.from_numpy(aligned_img)
+        new_aligned_predicteds[b] = torch.from_numpy(aligned_predicted)
         
-    aligned_imgs = torch.from_numpy(new_aligned_imgs).cuda()
-    aligned_predicteds = torch.from_numpy(new_aligned_predicteds).cuda()
+        if not unseen:
+            new_aligned_masks[b] = aligned_mask
+        
+    aligned_imgs = torch.stack(new_aligned_imgs,dim=0).cuda()      #torch.from_numpy(new_aligned_imgs).cuda()
+    aligned_predicteds = torch.stack(new_aligned_predicteds,dim=0).cuda()  #torch.from_numpy(new_aligned_predicteds).cuda()
     aligned_masks = torch.from_numpy(new_aligned_masks).cuda()
     return aligned_imgs, aligned_predicteds, aligned_masks
 

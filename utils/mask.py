@@ -3,6 +3,7 @@ import numpy as np
 
 import torch
 from torchvision.transforms import transforms
+from dataset.align import inverseTensor
 
 def combine_masks(input_tensor):
     batchSize, layers, height, width = input_tensor.shape
@@ -22,9 +23,22 @@ def split_masks(tensor, num_classes=19):
             masks[b, i] = (tensor[b] == i).type(tensor.dtype)
     return masks
 
-def predict_masks(model, images):
+def predict_masks(model, images, aligned_size, original_img_shape, r_mat):
     outputs = model(images)
     _, predicted = torch.max(outputs.data, 1)
+    mask = images.detach()
+
+    # Define the blue color
+    blue = torch.tensor([0, 0, 0], dtype=torch.uint8).view(1, 3, 1, 1).to(torch.float).to(images.device)
+
+    # Create a mask for blue pixels
+    # Compare each color channel with the blue color and take logical AND across channels
+    mask = torch.all(images == blue, dim=1)
+
+    # Set corresponding pixels in grayscale image to 0 where mask is True
+    predicted[mask] = 0
+    
+    images, predicted, _ = inverseTensor(images, predicted, images, aligned_size, original_img_shape, r_mat, unseen=True)
     return torch.nn.functional.interpolate(predicted.unsqueeze(1).float(), size=(256, 256), mode="nearest").cpu()
 
 def create_masks_dict(predicted, labels_celeb):

@@ -14,10 +14,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast as autocast
+from torch.cuda.amp import GradScaler
 
 # from model.unet import Model      # UNet
 # from model.efficientnet_unet import Model  # EfficientNet (Encoder) + UNet (Decoder)
-from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
+# from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
+from model.fine_tune import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder) + Fine-tune
 
 from dataset.dataset import Dataset
 from dataset.align import inverseTensor
@@ -34,20 +37,23 @@ torch.manual_seed(0)
 
 # Define paths
 CHECKPOINT_PATH = ''
-TRAIN_INDEX_PATH = 'data/train_aug_idx.txt'
+TRAIN_INDEX_PATH = 'data/train_idx.txt'
 TEST_INDEX_PATH = 'data/test_idx.txt'
+UNSEEN_INDEX_PATH = 'data/test_lapa_idx.txt'
 
 # Define modes
 MODE ='train'                               # train / test / csv
 RECORD = False                              # Record predictions in wandb
-SAVE_MODEL_NAME = 'EfficientNet_UNet_CBAM_AUG'  # Name of model to save
+SAVE_MODEL_NAME = 'FineTune'                # Name of model to save
 SAVE_IMAGES = False                         # Save images 
 EXPORT_TO_CSV_AFTER_TRAIN = True            # Export predictions to csv after training
 JUPYTER_NOTEBOOK = False                     # Run in Jupyter Notebook
+UNSEEN = True                              # Test on unseen data
+SAVE_CSV = True                            # Save csv file
 
 # Define hyperparameters
 EPOCHS = 20
-BATCH_SIZE = 1
+BATCH_SIZE = 3
 LEARNING_RATE = 1e-4
 
 # Set device
@@ -82,7 +88,7 @@ if RECORD and MODE == 'train':
         "epochs": 20,
         "Dropout": 0,
         "CBAM": "reduction_ratio=16, kernel_size=5",
-        "batch_size": 3,
+        "batch_size": 6,
         "EfficientNet": "b7",
         }
     )
@@ -103,24 +109,47 @@ else:
 # ## Setup model
 
 # %%
+import torch.nn.functional as F
+
+class loss(nn.Module):
+    def __init__(self):
+        super(loss, self).__init__()
+        self.loss = nn.CrossEntropyLoss()
+        self.weights = torch.tensor([
+            0.0, 0.0, 0.4, 
+            0.4, 1.0, 1.0, 0.3, 
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0], dtype=torch.float).to(device)
+
+    def forward(self, output, target):
+        cross_entropy = F.cross_entropy(output, target, weight=self.weights)
+        regularization_loss = torch.sum(self.weights ** 2)
+        return cross_entropy + regularization_loss * 0.1
+
+# %%
 # Create U-Net model
 model = Model(3, 19)
+model = nn.DataParallel(model)
 model = model.to(device)
 
 # Print total number of parameters
 print(f'Total number of parameters: {sum(p.numel() for p in model.parameters())}')
 
 # Define loss function and optimizer
-criterion = nn.CrossEntropyLoss()
+criterion = loss()
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Load dataset
 train_dataset = Dataset(id_file=TRAIN_INDEX_PATH, transform=ToTensor())
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-test_dataset = Dataset(id_file=TEST_INDEX_PATH, transform=ToTensor())
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
+if UNSEEN:
+    test_dataset = Dataset(id_file=UNSEEN_INDEX_PATH, transform=ToTensor(), unseen=True)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+else:
+    test_dataset = Dataset(id_file=TEST_INDEX_PATH, transform=ToTensor())
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # %% [markdown]
 # ## Setup TA Prediction function
@@ -131,6 +160,11 @@ labels_celeb = ['background', 'skin', 'l_brow',
                 'l_ear', 'r_ear', 'ear_r', 'nose', 
                 'mouth', 'u_lip', 'l_lip', 'neck', 
                 'neck_l', 'cloth', 'hair', 'hat']
+# [0.0, 0.0, 0.4, 
+# 0.4, 1.0, 1.0, 0.3, 
+# 0.0, 0.0, 0.0, 0.0,
+# 0.0, 0.0, 0.0, 0.0,
+# 0.0, 0.0, 0.0, 0.0]
 
 labels_celeb_origin = ['background', 'skin', 'nose',
                        'eye_g', 'l_eye', 'r_eye', 'l_brow',
@@ -231,21 +265,28 @@ def export_model_to_csv(model, test_loader, save_images=False):
     model.load_state_dict(torch.load(CHECKPOINT_PATH))
     model.eval()
 
-    if not os.path.exists(log_dir):
+    if not os.path.exists(log_dir) and SAVE_CSV:
         os.makedirs(log_dir)
-    if os.path.exists(f'{log_dir}/mask.csv'):
+    if os.path.exists(f'{log_dir}/mask.csv') and SAVE_CSV:
         os.rename(f'{log_dir}/mask.csv', f'{log_dir}/mask_{get_current_timestamp()}.csv')
+    with torch.no_grad():
+        for images, masks, idx, aligned_size, original_img_shape, r_mat  in tqdm(test_loader):
+            images, masks = images.to(device), masks.to(device).squeeze(1)
+            predicted = predict_masks(model, images, aligned_size, original_img_shape, r_mat)
+            if idx[0].item() % 100 == 0:
+                fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+                axes[0].imshow(images[0].cpu().numpy().transpose(1, 2, 0))
+                axes[1].imshow(predicted[0].squeeze(0).cpu().numpy())
+                plt.show()
 
-    for images, masks, idx, aligned_size, original_img_shape, r_mat  in tqdm(test_loader):
-        images, masks = images.to(device), masks.to(device).squeeze(1)
-        predicted = predict_masks(model, images)
+            dict_data_batch = create_masks_dict(predicted, labels_celeb)
+            save_images_if_required(dict_data_batch, idx, labels_celeb, save_images)
 
-        dict_data_batch = create_masks_dict(predicted, labels_celeb)
-        save_images_if_required(dict_data_batch, idx, labels_celeb, save_images)
-
-        for i, dict_data in enumerate(dict_data_batch):
-            reordered_dict_data = reorder_dict_data(dict_data, labels_celeb_origin)
-            mask2csv2(reordered_dict_data, csv_path=f'{log_dir}/mask.csv', image_id=idx[i].item())
+            for i, dict_data in enumerate(dict_data_batch):
+                reordered_dict_data = reorder_dict_data(dict_data, labels_celeb_origin)
+                if SAVE_CSV:
+                    mask2csv2(reordered_dict_data, csv_path=f'{log_dir}/mask.csv', image_id=idx[i].item())
+                
 
 
 # %% [markdown]
@@ -261,19 +302,24 @@ def train(model, train_loader, test_loader, criterion, optimizer):
     model.train()
     all_train_loss = []
     all_test_loss = []
+    scaler = GradScaler()
     for epoch in tqdm(range(EPOCHS), leave=True):
         for images, masks, _, aligned_size, original_img_shape, r_mat in tqdm(train_loader, leave=False):
             images = images.to(device)
             masks = masks.to(device).squeeze(1)
 
             # Forward pass
-            outputs = model(images)
-            train_loss = criterion(outputs, masks)
-
+            with autocast():
+                outputs = model(images)
+                train_loss = criterion(outputs, masks)
+                
             # Backward and optimize
             optimizer.zero_grad()
-            train_loss.backward()
-            optimizer.step()
+            scaler.scale(train_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            # train_loss.backward()
+            # optimizer.step()
             
         model.eval()
         with torch.no_grad():
@@ -332,32 +378,47 @@ def test(model, test_loader):
     metrics.reset()
     total_loss = 0
     seq = 0
-    for images, masks, idx, aligned_size, original_img_shape, r_mat in tqdm(test_loader):
-        
-        images, masks = images.to(device), masks.to(device).squeeze(1)
-        outputs = model(images)
-        loss = criterion(outputs, masks)
-        
-        total_loss += loss.item()
-        _, predicted = torch.max(outputs.data, 1)
-        
-        # Update F1 score
-        pred = outputs.data.max(1)[1].cpu().numpy()  # Matrix index
-        gt = combine_masks(masks).cpu().numpy()
-        metrics.update(gt, pred)
-        seq += 1
-        
-        images, predicted, masks = inverseTensor(images, predicted, masks, aligned_size, original_img_shape, r_mat)
-        
-        if JUPYTER_NOTEBOOK:
-            # if seq % 100 == 0 and seq < 400:
-            if True:
-                visualize_predictions_jupyter(images, predicted, masks)
+    with torch.no_grad():
+        if UNSEEN:
+            for images, _, idx, aligned_size, original_img_shape, r_mat in tqdm(test_loader):
+                
+                images = images.to(device)
+                outputs = model(images)
+                _, predicted = torch.max(outputs.data, 1)
+                
+                images, predicted, _ = inverseTensor(images, predicted, images, aligned_size, original_img_shape, r_mat, unseen=True)
+                print(predicted.shape)
+                
+                if JUPYTER_NOTEBOOK:
+                    if True:
+                        visualize_predictions_jupyter(images, predicted, None, unseen=True)
         else:
-            output_dir = os.path.join(log_dir, 'images')
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            visualize_predictions(images, predicted, masks, idx, base_path=output_dir)
+            for images, masks, idx, aligned_size, original_img_shape, r_mat in tqdm(test_loader):
+                
+                images, masks = images.to(device), masks.to(device).squeeze(1)
+                outputs = model(images)
+                loss = criterion(outputs, masks)
+                
+                total_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                
+                # Update F1 score
+                pred = outputs.data.max(1)[1].cpu().numpy()  # Matrix index
+                gt = combine_masks(masks).cpu().numpy()
+                metrics.update(gt, pred)
+                seq += 1
+                
+                images, predicted, masks = inverseTensor(images, predicted, masks, aligned_size, original_img_shape, r_mat)
+                
+                if JUPYTER_NOTEBOOK:
+                    # if seq % 100 == 0 and seq < 400:
+                    if True:
+                        visualize_predictions_jupyter(images, predicted, masks)
+                else:
+                    output_dir = os.path.join(log_dir, 'images')
+                    if not os.path.exists(output_dir):
+                        os.makedirs(output_dir)
+                    visualize_predictions(images, predicted, masks, idx, base_path=output_dir)
 
     avg_loss = total_loss / len(test_loader)
     F1_score = metrics.get_f1_score()
