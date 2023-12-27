@@ -19,8 +19,8 @@ from torch.cuda.amp import GradScaler
 
 # from model.unet import Model      # UNet
 # from model.efficientnet_unet import Model  # EfficientNet (Encoder) + UNet (Decoder)
-# from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
-from model.fine_tune import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder) + Fine-tune
+from model.efficientnet_cbam_unet import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder)
+# from model.fine_tune import Model  # EfficientNet (Encoder) + CBAM + UNet (Decoder) + Fine-tune
 
 from dataset.dataset import Dataset
 from dataset.align import inverseTensor
@@ -43,17 +43,17 @@ UNSEEN_INDEX_PATH = 'data/test_lapa_idx.txt'
 
 # Define modes
 MODE ='train'                               # train / test / csv
-RECORD = False                              # Record predictions in wandb
-SAVE_MODEL_NAME = 'FineTune'                # Name of model to save
+RECORD = True                              # Record predictions in wandb
+SAVE_MODEL_NAME = 'B4'  # Name of model to save
 SAVE_IMAGES = False                         # Save images 
-EXPORT_TO_CSV_AFTER_TRAIN = True            # Export predictions to csv after training
+EXPORT_TO_CSV_AFTER_TRAIN = False            # Export predictions to csv after training
 JUPYTER_NOTEBOOK = False                     # Run in Jupyter Notebook
-UNSEEN = True                              # Test on unseen data
+UNSEEN = False                              # Test on unseen data
 SAVE_CSV = True                            # Save csv file
 
 # Define hyperparameters
-EPOCHS = 20
-BATCH_SIZE = 3
+EPOCHS = 15
+BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
 
 # Set device
@@ -130,14 +130,13 @@ class loss(nn.Module):
 # %%
 # Create U-Net model
 model = Model(3, 19)
-model = nn.DataParallel(model)
 model = model.to(device)
 
 # Print total number of parameters
 print(f'Total number of parameters: {sum(p.numel() for p in model.parameters())}')
 
 # Define loss function and optimizer
-criterion = loss()
+criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 # Load dataset

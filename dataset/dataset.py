@@ -77,6 +77,9 @@ class Dataset(Dataset):
             cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
             cv_image = cv2.resize(cv_image, (512, 512), interpolation=cv2.INTER_LINEAR)
             
+            cv_mask = cv2.imread(mask_name, cv2.IMREAD_GRAYSCALE)
+            cv_mask = cv2.resize(cv_mask, (512, 512), interpolation=cv2.INTER_NEAREST)
+            
             # Image alignmnet
             detected_landmarks = landmarks(cv_image, toRGB = True)
             if detected_landmarks is None:
@@ -92,7 +95,6 @@ class Dataset(Dataset):
                 aligned_img = cv2.resize(aligned_img, (512, 512), interpolation=cv2.INTER_LINEAR)
                 image = Image.fromarray(aligned_img)
 
-                cv_mask = cv2.imread(mask_name, cv2.IMREAD_GRAYSCALE)
                 aligned_mask = cv2.warpAffine(cv_mask, r_mat, aligned_size)
                 aligned_mask = cv2.resize(aligned_mask, (512, 512), interpolation=cv2.INTER_NEAREST)
                 mask = Image.fromarray(aligned_mask)

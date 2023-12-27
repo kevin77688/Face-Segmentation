@@ -134,9 +134,10 @@ def inverseTensor(aligned_imgs, aligned_predicteds, aligned_masks, aligned_size,
         
         aligned_size = (aligned_size[1].cpu().numpy()[0], 
                         aligned_size[0].cpu().numpy()[0])
-        original_shape = (original_shape[1].cpu().numpy()[0], 
-                          original_shape[0].cpu().numpy()[0], 
-                          original_shape[2].cpu().numpy()[0])
+        
+        original_shape = (original_shape[1].cpu().numpy()[0],
+                            original_shape[0].cpu().numpy()[0],
+                            original_shape[2].cpu().numpy()[0])
         r_mat = r_mat.cpu().numpy()[0]
         
         r_mat = np.vstack([r_mat, np.array([0, 0, 1])])
