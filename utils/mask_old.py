@@ -1,8 +1,11 @@
 import os
 import numpy as np
+from PIL import Image
+import cv2
 
 import torch
 from torchvision.transforms import transforms
+from utils.postprocess import remove_redundant
 
 def combine_masks(input_tensor):
     batchSize, layers, height, width = input_tensor.shape
@@ -21,11 +24,18 @@ def split_masks(tensor, num_classes=19):
         for i in range(num_classes):
             masks[b, i] = (tensor[b] == i).type(tensor.dtype)
     return masks
-
-def predict_masks(model, images, aligned_size, original_img_shape, r_mat):
+seq = 0
+def predict_masks(model, images, csv=True):
     outputs = model(images)
     _, predicted = torch.max(outputs.data, 1)
-    return torch.nn.functional.interpolate(predicted.unsqueeze(1).float(), size=(256, 256), mode="nearest").cpu()
+    np_image = images.clone().cpu().squeeze(0).permute(1, 2, 0).numpy() * 255
+    np_predicted = predicted.detach().cpu().squeeze(0).numpy()
+    np_predicted = remove_redundant(np_image, np_predicted)
+    predicted = torch.from_numpy(np_predicted).unsqueeze(0).float()
+    if csv:
+        return torch.nn.functional.interpolate(predicted.unsqueeze(1).float(), size=(256, 256), mode="nearest").cpu()
+    else:
+        return torch.nn.functional.interpolate(predicted.unsqueeze(1).float(), size=(512, 512), mode="nearest").cpu()
 
 def create_masks_dict(predicted, labels_celeb):
     batch_size = predicted.shape[0]

@@ -33,6 +33,9 @@ class Dataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.unseen = unseen
+        if not self.unseen:
+            self.root_dir = os.path.join(self.root_dir, 'CelebAMask-HQ')
+
         with open(id_file, 'r') as file:
             self.image_ids = file.read().splitlines()
 
@@ -42,8 +45,10 @@ class Dataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-
-        img_name = os.path.join(self.root_dir, 'Unseen', f'{self.image_ids[idx]}.jpg')
+        if not self.unseen:
+            img_name = os.path.join(self.root_dir, 'CelebA-HQ-img', f'{self.image_ids[idx]}.jpg')
+        else:
+            img_name = os.path.join(self.root_dir, 'Unseen', f'{self.image_ids[idx]}.jpg')
         image = Image.open(img_name).convert('RGB').resize((512, 512))
 
         if not self.unseen:
@@ -59,4 +64,4 @@ class Dataset(Dataset):
             image = self.transform(image)
             # mask = self.transform(mask)
 
-        return image, mask, idx, torch.tensor([1]), torch.tensor([1]), torch.tensor([1])
+        return image, mask, idx

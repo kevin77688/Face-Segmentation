@@ -23,23 +23,23 @@ class DecoderBlock(nn.Module):
         return self.block(x)
 
 class Model(nn.Module):
-    def __init__(self, n_channels=3, n_classes=19, encoder_name='efficientnet-b7'):
+    def __init__(self, n_channels=3, n_classes=19, encoder_name='efficientnet-b4'):
         super().__init__()
         self.encoder = EfficientNet.from_pretrained(encoder_name)
 
-        self.decoder1 = DecoderBlock(2560 + 640, 2560, 640)
-        self.decoder2 = DecoderBlock(640 + 224, 640, 224)
-        self.decoder3 = DecoderBlock(224 + 80, 224, 80)
-        self.decoder4 = DecoderBlock(80 + 48, 80, 48)
-        self.decoder5 = DecoderBlock(48 + 32, 48, 32)
-        self.out_conv = nn.Conv2d(32, n_classes, kernel_size=1)
+        # self.decoder1 = DecoderBlock(2560 + 640, 2560, 640)
+        # self.decoder2 = DecoderBlock(640 + 224, 640, 224)
+        # self.decoder3 = DecoderBlock(224 + 80, 224, 80)
+        # self.decoder4 = DecoderBlock(80 + 48, 80, 48)
+        # self.decoder5 = DecoderBlock(48 + 32, 48, 32)
+        # self.out_conv = nn.Conv2d(32, n_classes, kernel_size=1)
         
-        # self.decoder1 = DecoderBlock(1792 + 448, 1792, 448)
-        # self.decoder2 = DecoderBlock(448 + 160, 448, 160)
-        # self.decoder3 = DecoderBlock(160 + 56, 160, 56)
-        # self.decoder4 = DecoderBlock(56 + 32, 56, 32)
-        # self.decoder5 = DecoderBlock(32 + 24, 32, 24)
-        # self.out_conv = nn.Conv2d(24, n_classes, kernel_size=1)
+        self.decoder1 = DecoderBlock(1792 + 448, 1792, 448)
+        self.decoder2 = DecoderBlock(448 + 160, 448, 160)
+        self.decoder3 = DecoderBlock(160 + 56, 160, 56)
+        self.decoder4 = DecoderBlock(56 + 32, 56, 32)
+        self.decoder5 = DecoderBlock(32 + 24, 32, 24)
+        self.out_conv = nn.Conv2d(24, n_classes, kernel_size=1)
         
 
     def forward(self, x):

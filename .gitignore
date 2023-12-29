@@ -201,3 +201,6 @@ wandb/*
 !out/.gitkeep
 !data/.gitkeep
 debug.ipynb
+!data/train_idx.txt
+!data/test_idx.txt
+!data/test_lapa_idx.txt
